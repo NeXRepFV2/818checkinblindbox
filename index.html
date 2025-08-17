@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>818启航盛典打卡盲盒 · 818 Grand Launch · Check-in Mystery Box</title>
+  <meta name="description" content="818启航盛典打卡盲盒 · 700次 · 触发点概率递增 · 窗口末必出" />
+  <style>
+    :root { --overlay: rgba(170, 24, 24, .58); --overlay2: rgba(255, 92, 0, .38); }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue','Noto Sans',Arial;
+      color:#fff;
+      background: url('bg818.png') center/cover no-repeat fixed;
+      position: relative; min-height: 100vh;
+    }
+    body::before{
+      content:""; position:fixed; inset:0;
+      background:
+        radial-gradient(1200px 600px at 50% 30%, var(--overlay2), rgba(0,0,0,0) 70%),
+        linear-gradient(180deg, rgba(0,0,0,.75), rgba(0,0,0,.55) 30%, rgba(0,0,0,.75));
+      pointer-events:none; z-index:-1;
+    }
+    header{ padding: 28px 16px 12px; text-align:center; text-shadow: 0 2px 12px rgba(0,0,0,.45); }
+    h1{ margin:0; font-size: clamp(24px, 4vw, 40px); font-weight:800; letter-spacing: .5px;}
+    .subtitle{ margin-top:6px; color:#ffd7a8; font-size: clamp(12px, 2.2vw, 16px); }
+    .container{ max-width: 960px; margin: 0 auto; padding: 16px; }
+    .panel{
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: 14px; padding: 18px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    .form-box input{ width:260px; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.15);
+      background: rgba(0,0,0,.35); color:#fff; margin:6px; }
+    .form-box button{
+      padding: 10px 20px; font-size: 18px;
+      background: linear-gradient(135deg,#ff7a00,#ffb703); color:#1a1a1a; border:none; border-radius:10px; cursor:pointer; margin-top:10px;
+      box-shadow: 0 6px 18px rgba(255,122,0,.35);
+    }
+    .box{ width: 240px; height: 240px; margin:24px auto 0; border-radius:18px;
+      background: url('mang he.png') center/cover no-repeat;
+      box-shadow: 0 12px 36px rgba(0,0,0,.45);
+    }
+    .shake { animation: shake 900ms ease-in-out; }
+    @keyframes shake {
+      0%{transform:translate(0,0) rotate(0deg)}
+      10%{transform:translate(-8px,6px) rotate(-5deg)}
+      20%{transform:translate(8px,-6px) rotate(5deg)}
+      30%{transform:translate(-10px,8px) rotate(-6deg)}
+      40%{transform:translate(10px,-8px) rotate(6deg)}
+      50%{transform:translate(-6px,6px) rotate(-4deg)}
+      60%{transform:translate(6px,-6px) rotate(4deg)}
+      70%{transform:translate(-4px,4px) rotate(-3deg)}
+      80%{transform:translate(4px,-4px) rotate(3deg)}
+      100%{transform:translate(0,0) rotate(0deg)}
+    }
+    #result{max-height:360px;overflow:auto;margin-top:12px;display:flex;flex-direction:column;gap:6px}
+    .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+    .muted{opacity:.7;font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>818启航盛典打卡盲盒</h1>
+    <div class="subtitle">818 Grand Launch · Check-in Mystery Box</div>
+  </header>
+
+  <div class="container">
+    <div class="panel">
+      <div class="form-box" style="text-align:center">
+        <div class="row">
+          <input type="text" id="userID" placeholder="请输入您的ID号 (ZMYXXXXXXXX)" />
+          <input type="email" id="email" placeholder="（可选）请输入您的邮箱地址 / Optional email" />
+          <input type="number" id="chances" placeholder="请输入抽奖次数 / Draws" min="1" value="1" />
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button onclick="startDraws()">开始抽奖 / Start</button>
+          <button onclick="exportToCSV()">导出抽奖数据 CSV</button>
+        </div>
+        <div class="box" id="box" title="点击开始抽奖 / Click Start"></div>
+        <div id="result"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ===== Google Sheets Web App URL =====
+  const googleScriptURL = "https://script.google.com/macros/s/AKfycbzD5aJHsRxsaPdjMAR7_LY4DugNZhold9iP3dx6OmP_CP4xROB21U0xlRIWqI1bs8V3/exec";
+
+  // ===== 奖池逻辑：触发点 + 概率递增 + 窗口末必出 =====
+  const CONFIG = {
+    total: 700, // 总抽数限制
+    labels: {
+      G1: "RM999 肩膀按摩仪 / The Euphoria Essential Massager",
+      G2: "RM5"
+    },
+    baseProb: 0.12,
+    stepProb: 0.08,
+    maxProb: 0.90,
+    triggers: (function(){ const arr=[5]; for(let n=50;n<=700;n+=50) arr.push(n); return arr; })()
+  };
+
+  let globalDrawCount = 0;
+  const drawRecords = [];
+  let windowIndex = 0;
+  const windowHit = Array(CONFIG.triggers.length).fill(false);
+
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return (Date.now().toString(36) + Math.random().toString(36).slice(2));
+  }
+
+  function shakeBox() {
+    const box = document.getElementById('box');
+    box.classList.remove('shake');
+    void box.offsetWidth;
+    box.classList.add('shake');
+  }
+
+  function startDraws() {
+    const userID = document.getElementById("userID").value.trim();
+    const chances = parseInt(document.getElementById("chances").value.trim());
+    if (!userID || isNaN(chances) || chances < 1) {
+      alert("请输入ID号，并确保抽奖次数 ≥ 1！ / Please input ID and a valid number of draws (≥1).");
+      return;
+    }
+    if (globalDrawCount >= CONFIG.total) {
+      alert("已达到 700 次上限");
+      return;
+    }
+    drawLoop(chances, userID);
+  }
+
+  function nextTrigger(i){ return (i+1 < CONFIG.triggers.length) ? CONFIG.triggers[i+1] : (CONFIG.total + 1); }
+
+  function drawLoop(left, userID){
+    if (left <= 0 || globalDrawCount >= CONFIG.total) return;
+    shakeBox();
+    setTimeout(()=>{ performDraw(userID); if (left > 1) setTimeout(()=>drawLoop(left-1, userID), 200); }, 920);
+  }
+
+  function performDraw(userID) {
+    globalDrawCount++;
+
+    while (windowIndex < CONFIG.triggers.length - 1 && globalDrawCount >= CONFIG.triggers[windowIndex + 1]) {
+      windowIndex++;
+    }
+    const trig = CONFIG.triggers[windowIndex];
+    const nextTrig = nextTrigger(windowIndex);
+    let prize = CONFIG.labels.G2;
+
+    if (!windowHit[windowIndex] && globalDrawCount >= trig) {
+      const inWindowIndex = globalDrawCount - trig;
+      const isLastChanceBeforeNext = (globalDrawCount === nextTrig - 1) || (globalDrawCount === CONFIG.total);
+      let p = Math.min(CONFIG.baseProb + inWindowIndex * CONFIG.stepProb, CONFIG.maxProb);
+      if (isLastChanceBeforeNext) p = 1.0;
+      if (Math.random() < p) { prize = CONFIG.labels.G1; windowHit[windowIndex] = true; }
+    }
+
+    const now = new Date();
+    const gmt8Time = new Date(now.getTime() + 8 * 3600000).toISOString().replace('T',' ').split('.')[0] + ' GMT+8';
+
+    const record = { userID, prize, time: gmt8Time, drawNo: globalDrawCount, rid: uuid() };
+    drawRecords.push(record);
+
+    sendRecord(record);
+
+    const line = `#${globalDrawCount} 🎉 <b>${userID}</b> 抽中 / won: <b>${prize}</b> <span class="muted">(${gmt8Time})</span>`;
+    const div = document.createElement('div'); div.innerHTML = line;
+    const result = document.getElementById("result"); result.prepend(div); result.scrollTop = 0;
+  }
+
+  // —— 上报到 Google Sheets（单一通道 + 明确回退，避免重复） ——
+  function sendRecord(payload) {
+    const form = new URLSearchParams({
+      userID: payload.userID || '',
+      prize:  payload.prize  || '',
+      time:   payload.time   || '',
+      rid:    payload.rid    || ''
+    }).toString();
+
+    // 1) sendBeacon（最优先）。若浏览器支持且返回 true，则不再执行后续通道。
+    try {
+      if (navigator.sendBeacon) {
+        const ok = navigator.sendBeacon(googleScriptURL, new Blob([form], { type: 'application/x-www-form-urlencoded;charset=UTF-8' }));
+        if (ok) return;
+      }
+    } catch(_){}
+
+    // 2) fetch POST（不再追加 GET；除非网络抛错才用 GET）
+    try {
+      fetch(googleScriptURL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: form
+      }).catch(()=>{
+        // 3) 仅在 fetch 真正失败时再 GET 兜底
+        fetch(googleScriptURL + '?' + form, { mode: 'no-cors' });
+      });
+    } catch(_){
+      try { fetch(googleScriptURL + '?' + form, { mode: 'no-cors' }); } catch(__){}
+    }
+  }
+
+  function exportToCSV(){
+    let csv = '序号,ID号,奖项,抽奖时间 (GMT+8)\\n';
+    drawRecords.forEach((r)=>{ csv += `${r.drawNo},${r.userID},${r.prize},${r.time}\\n`; });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = '抽奖记录.csv';
+    document.body.appendChild(link); link.click(); link.remove();
+  }
+</script>
+</body>
+</html>
