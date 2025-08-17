@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>818启航盛典打卡盲盒 · 818 Grand Launch · Check-in Mystery Box</title>
+  <meta name="description" content="818启航盛典打卡盲盒 · 700次固定掉落 · 上报ID/奖项/抽奖时间(GMT+8)" />
+  <style>
+    :root { --overlay: rgba(170, 24, 24, .58); --overlay2: rgba(255, 92, 0, .38); }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue','Noto Sans',Arial;
+      color:#fff;
+      background: url('bg818.png') center/cover no-repeat fixed;
+      position: relative; min-height: 100vh;
+    }
+    body::before{
+      content:""; position:fixed; inset:0;
+      background:
+        radial-gradient(1200px 600px at 50% 30%, var(--overlay2), rgba(0,0,0,0) 70%),
+        linear-gradient(180deg, rgba(0,0,0,.75), rgba(0,0,0,.55) 30%, rgba(0,0,0,.75));
+      pointer-events:none; z-index:-1;
+    }
+    header{ padding: 28px 16px 12px; text-align:center; text-shadow: 0 2px 12px rgba(0,0,0,.45); }
+    h1{ margin:0; font-size: clamp(24px, 4vw, 40px); font-weight:800; letter-spacing: .5px;}
+    .subtitle{ margin-top:6px; color:#ffd7a8; font-size: clamp(12px, 2.2vw, 16px); }
+    .container{ max-width: 960px; margin: 0 auto; padding: 16px; }
+    .panel{
+      background: rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: 14px; padding: 18px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    .form-box input{ width:260px; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.15);
+      background: rgba(0,0,0,.35); color:#fff; margin:6px; }
+    .form-box button{
+      padding: 10px 20px; font-size: 18px;
+      background: linear-gradient(135deg,#ff7a00,#ffb703); color:#1a1a1a; border:none; border-radius:10px; cursor:pointer; margin-top:10px;
+      box-shadow: 0 6px 18px rgba(255,122,0,.35);
+    }
+    .box{ width: 240px; height: 240px; margin:24px auto 0; border-radius:18px;
+      background: url('mang he.png') center/cover no-repeat;
+      box-shadow: 0 12px 36px rgba(0,0,0,.45); animation: shake 0s; }
+    @keyframes shake {
+      0%{transform:translate(0,0) rotate(0deg)}
+      25%{transform:translate(-6px,6px) rotate(-5deg)}
+      50%{transform:translate(6px,-6px) rotate(5deg)}
+      75%{transform:translate(-4px,4px) rotate(-3deg)}
+      100%{transform:translate(0,0) rotate(0deg)}
+    }
+    #result{max-height:360px;overflow:auto;margin-top:12px;display:flex;flex-direction:column;gap:6px}
+    .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+    .muted{opacity:.7;font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>818启航盛典打卡盲盒</h1>
+    <div class="subtitle">818 Grand Launch · Check-in Mystery Box</div>
+  </header>
+
+  <div class="container">
+    <div class="panel">
+      <div class="form-box" style="text-align:center">
+        <div class="row">
+          <input type="text" id="userID" placeholder="请输入您的ID号 (ZMYXXXXXXXX)" />
+          <input type="email" id="email" placeholder="（可选）请输入您的邮箱地址 / Optional email" />
+          <input type="number" id="chances" placeholder="请输入抽奖次数 / Draws" min="1" value="1" />
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button onclick="startDraws()">开始抽奖 / Start</button>
+          <button onclick="exportToCSV()">导出抽奖数据 CSV</button>
+        </div>
+        <div class="box" id="box" title="点击开始抽奖 / Click Start"></div>
+        <div id="result"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // Google Apps Script 接口（上报三列：ID号/奖项/抽奖时间）
+  const googleScriptURL = "https://script.google.com/macros/s/AKfycbymCT-DciBzuU7exJ49YObxSRsNNwesgoehvF0rqBbEUI1bvf2sP0dbVRsSV3j6K5VKzw/exec";
+
+  // 700 次；RM999 固定在 5、50、100、150...700 次掉落
+  const CONFIG = {
+    total: 700,
+    labels: {
+      G1: "RM999 肩膀按摩仪 / The Euphoria Essential Massager",
+      G2: "RM5"
+    },
+    hardWindows: (function(){
+      const arr = [5];
+      for (let n = 50; n <= 700; n += 50) arr.push(n);
+      return arr;
+    })()
+  };
+
+  let globalDrawCount = 0;
+  const drawRecords = [];
+
+  function startDraws() {
+    const userID = document.getElementById("userID").value.trim();
+    const chances = parseInt(document.getElementById("chances").value.trim());
+    if (!userID || isNaN(chances) || chances < 1) {
+      alert("请输入ID号，并确保抽奖次数 ≥ 1！ / Please input ID and a valid number of draws (≥1).");
+      return;
+    }
+    drawLoop(chances, userID);
+  }
+
+  function drawLoop(left, userID){
+    if (left <= 0 || globalDrawCount >= CONFIG.total) return;
+    const box = document.getElementById("box");
+    box.style.animation = "shake 1s";
+
+    setTimeout(()=>{
+      globalDrawCount++;
+      const isG1 = CONFIG.hardWindows.includes(globalDrawCount);
+      const prize = isG1 ? CONFIG.labels.G1 : CONFIG.labels.G2;
+
+      const now = new Date();
+      const gmt8Time = new Date(now.getTime() + 8 * 3600000)
+        .toISOString().replace('T',' ').split('.')[0] + ' GMT+8';
+
+      const record = { userID, prize, time: gmt8Time, drawNo: globalDrawCount };
+      drawRecords.push(record);
+
+      try{
+        fetch(googleScriptURL, {
+          method: 'POST', mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userID: record.userID, prize: record.prize, time: record.time })
+        });
+      } catch(e){ /* ignore network/cors issues */ }
+
+      const line = `#${globalDrawCount} 🎉 <b>${userID}</b> 抽中 / won: <b>${prize}</b> <span class="muted">(${gmt8Time})</span>`;
+      const div = document.createElement('div'); div.innerHTML = line;
+      const result = document.getElementById("result");
+      result.prepend(div); result.scrollTop = 0;
+
+      if (left > 1) setTimeout(()=>drawLoop(left-1, userID), 300);
+    }, 1000);
+  }
+
+  function exportToCSV(){
+    let csv = '序号,ID号,奖项,抽奖时间 (GMT+8)\n';
+    drawRecords.forEach((r)=>{ csv += `${r.drawNo},${r.userID},${r.prize},${r.time}\n`; });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = '抽奖记录.csv';
+    document.body.appendChild(link); link.click(); link.remove();
+  }
+</script>
+</body>
+</html>
